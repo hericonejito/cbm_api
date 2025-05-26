@@ -1,0 +1,20 @@
+{
+  "dataset": "multi_train",
+  "concept_set": "multi_train_filtered.txt",
+  "backbone": "resnet18_cub",
+  "clip_name": "ViT-B/16",
+  "device": "cpu",
+  "batch_size": 512,
+  "saga_batch_size": 256,
+  "proj_batch_size": 50000,
+  "feature_layer": "second_to_last",
+  "activation_dir": "saved_activations",
+  "save_dir": "saved_models",
+  "save_name": "multi_train",
+  "clip_cutoff": 0.25,
+  "proj_steps": 1000,
+  "interpretability_cutoff": 0.45,
+  "lam": 0.0007,
+  "n_iters": 1000,
+  "print": false
+}

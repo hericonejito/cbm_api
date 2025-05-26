@@ -1,0 +1,14 @@
+[
+  {
+    "feedback_id": "1701aaf4-0768-4354-83cb-2628360c7af0",
+    "frame_id": "frame_15_95bc30e3",
+    "image_path": "/Users/steheri/PycharmProjects/cbm_api/shared_data/active_learning_feedback/normal/1701aaf4-0768-4354-83cb-2628360c7af0_frame_15_95bc30e3.jpg",
+    "model_prediction": "Crack",
+    "expert_classification": "normal",
+    "confidence_score": 0.8,
+    "expert_notes": null,
+    "pipe_id": null,
+    "timestamp": "2025-05-26T23:35:21.080622",
+    "is_correction": true
+  }
+]
