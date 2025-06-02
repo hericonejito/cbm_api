@@ -4,41 +4,96 @@ import uuid
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Import your existing modules
 from app.cbm_model import CBM_model, load_cbm
 from app.feedback_manager import save_feedback
 from app.retrain import retrain_cbm
 from app.video_processor import process_video
 from app.intervention import load_model_and_data, predict_and_visualize
 import numpy as np
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+# Right after creating the FastAPI app instance
+app = FastAPI(title="CBM Video Processing API", version="1.0.0")
 
-# ✅ Get absolute path to shared_data
+# Add this CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+# ✅ Directory Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_DATA_DIR = os.path.join(BASE_DIR, "..", "shared_data")
 SHARED_DATA_DIR = os.path.abspath(SHARED_DATA_DIR)
 
+# Video and processing directories
+VIDEO_UPLOAD_DIR = os.path.join(SHARED_DATA_DIR, "videos_to_frame")
+FRAMES_BASE_DIR = os.path.join(SHARED_DATA_DIR, "video_frames")
+PREDICTIONS_BASE_DIR = os.path.join(SHARED_DATA_DIR, "predictions")
+
+# Model directories
 TRAINED_MODEL_DIR = os.path.join(BASE_DIR, "trained_model")
-print('Trained Model Dir ' + TRAINED_MODEL_DIR)
-
-# Active Learning Configuration
 FEEDBACK_DATA_DIR = os.path.join(SHARED_DATA_DIR, "active_learning_feedback")
-ANNOTATIONS_FILE = "annotations.json"
-RETRAIN_TRIGGER_COUNT = 50  # Retrain after N new samples (adjusted for your use case)
 
-# ✅ Mount using absolute path
+# Configuration
+RETRAIN_TRIGGER_COUNT = 50
+ANNOTATIONS_FILE = "annotations.json"
+
+# Create necessary directories
+os.makedirs(VIDEO_UPLOAD_DIR, exist_ok=True)
+os.makedirs(FRAMES_BASE_DIR, exist_ok=True)
+os.makedirs(PREDICTIONS_BASE_DIR, exist_ok=True)
+os.makedirs(FEEDBACK_DATA_DIR, exist_ok=True)
+
+# Mount static files
 app.mount("/shared_data", StaticFiles(directory=SHARED_DATA_DIR), name="shared_data")
+
+# Load initial model
 model = load_cbm(TRAINED_MODEL_DIR, 'cpu')
 
 
-# Pydantic models for Active Learning
+# Pydantic Models
+class VideoUploadResponse(BaseModel):
+    status: str
+    message: str
+    video_id: str
+    video_name: str
+    upload_path: str
+    total_frames_extracted: int
+
+
+class PredictionRequest(BaseModel):
+    video_name: str
+    frame_interval: Optional[int] = 50
+
+
+class PredictionResponse(BaseModel):
+    status: str
+    video_name: str
+    total_predictions: int
+    predictions_by_class: Dict[str, int]
+    predictions: List[Dict]
+
+
+class FeedbackRequest(BaseModel):
+    video_name: str
+    frame_id: str
+    model_prediction: str
+    expert_classification: str
+    confidence_score: Optional[float] = None
+    expert_notes: Optional[str] = None
+
+
 class FeedbackResponse(BaseModel):
     status: str
     message: str
@@ -47,26 +102,46 @@ class FeedbackResponse(BaseModel):
     ready_for_retrain: bool
 
 
-def to_url_path(abs_path):
-    """Convert absolute shared data path to a URL that can be accessed via FastAPI static mount."""
-    if SHARED_DATA_DIR in abs_path:
-        relative_path = os.path.relpath(abs_path, SHARED_DATA_DIR)
-        return f"/shared_data/{relative_path.replace(os.sep, '/')}"
-    else:
-        raise ValueError("Path not inside SHARED_DATA_DIR")
+# Utility Functions
+def ensure_directories():
+    """Create necessary directories for the application"""
+    directories = [
+        VIDEO_UPLOAD_DIR,
+        FRAMES_BASE_DIR,
+        PREDICTIONS_BASE_DIR,
+        FEEDBACK_DATA_DIR
+    ]
+
+    for directory in directories:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+
+    # Create class-specific feedback directories
+    class_names = ["normal", "crack", "corrosion", "leakage"]
+    for class_name in class_names:
+        Path(FEEDBACK_DATA_DIR, class_name).mkdir(exist_ok=True)
 
 
-def ensure_feedback_directories():
-    """Create necessary directories for storing active learning feedback data"""
-    base_path = Path(FEEDBACK_DATA_DIR)
-    base_path.mkdir(exist_ok=True)
+def extract_frames_from_video(video_path: str, output_folder: str, video_name: str, frame_interval: int = 50):
+    """Extract frames from video using your existing video_processor"""
+    try:
+        # Create video-specific frame directory
+        video_frame_dir = os.path.join(output_folder, video_name,'Normal')
+        os.makedirs(video_frame_dir, exist_ok=True)
 
-    # Create subdirectories for different outlier types (adjust based on your classes)
-    outlier_types = ["normal", "crack", "corrosion", "leakage"]
-    for outlier_type in outlier_types:
-        (base_path / outlier_type).mkdir(exist_ok=True)
+        # Use your existing process_video function
+        results = process_video(video_path, video_frame_dir, video_name, frame_interval)
 
-    return base_path
+        return {
+            "success": True,
+            "frame_directory": video_frame_dir,
+            "total_frames": len(results),
+            "frame_paths": results
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 def load_annotations():
@@ -85,62 +160,229 @@ def save_annotations(annotations):
         json.dump(annotations, f, indent=2)
 
 
-def get_sample_count():
-    """Count total samples collected"""
-    annotations = load_annotations()
-    return len(annotations)
+# API Endpoints
 
+@app.post("/upload_video", response_model=VideoUploadResponse)
+async def upload_video(
+        file: UploadFile = File(...),
+        frame_interval: int = Form(50, description="Extract every Nth frame")
+):
+    """
+    Upload a video file and extract frames based on the specified interval.
 
-@app.post("/predict_frames")
-async def predict_frames(request: dict):
-    video_name = "multi_train"
-    model_loaded, val_data_t, val_pil_data, classes, concepts, dataset = load_model_and_data(TRAINED_MODEL_DIR, 'cpu')
-    frame_folder = os.path.join(SHARED_DATA_DIR, video_name)
+    Args:
+        file: Video file to upload
+        frame_interval: Extract every Nth frame (default: 50)
+
+    Returns:
+        VideoUploadResponse with upload details and frame extraction results
+    """
     try:
-        predictions = predict_and_visualize(model_loaded, val_data_t, val_pil_data, classes, concepts, dataset,
-                                            'cpu', np.linspace(0, len(val_data_t) - 1, len(val_data_t), dtype=int))
+        # Validate file type
+        if not file.filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+            raise HTTPException(status_code=400, detail="Invalid video file format")
 
-        formatted_results = [
-            {
-                "path": prediction['filename'],
-                "label": prediction['class'],
-                "confidence": prediction['confidence'],
-                "frame_id": f"frame_{i}_{uuid.uuid4().hex[:8]}"  # Add unique frame ID for feedback tracking
-            } for i, prediction in enumerate(predictions)
-        ]
-        print(formatted_results)
-        return JSONResponse(content={"results": json.dumps(formatted_results)}, status_code=200)
+        # Generate unique video ID and extract video name
+        video_id = str(uuid.uuid4())
+        video_name = os.path.splitext(file.filename)[0]
+        video_filename = f"{video_name}_{video_id}.mp4"
+
+        # Save uploaded video
+        video_save_path = os.path.join(VIDEO_UPLOAD_DIR, video_filename)
+        with open(video_save_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+
+        # Extract frames
+        frame_extraction_result = extract_frames_from_video(
+            video_save_path,
+            FRAMES_BASE_DIR,
+            f"{video_name}_{video_id}",
+            frame_interval
+        )
+
+        if not frame_extraction_result["success"]:
+            raise HTTPException(status_code=500, detail=f"Frame extraction failed: {frame_extraction_result['error']}")
+
+        return VideoUploadResponse(
+            status="success",
+            message=f"Video uploaded and {frame_extraction_result['total_frames']} frames extracted successfully",
+            video_id=video_id,
+            video_name=f"{video_name}_{video_id}",
+            upload_path=video_save_path,
+            total_frames_extracted=frame_extraction_result['total_frames']
+        )
 
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        raise HTTPException(status_code=500, detail=f"Error processing video: {str(e)}")
 
 
-# Enhanced feedback endpoint for active learning
+@app.post("/predict_frames/{video_name}", response_model=PredictionResponse)
+async def predict_video_frames(video_name: str):
+    """
+    Run CBM model predictions on extracted frames for a specific video.
+
+    Args:
+        video_name: Name of the video (from upload response)
+
+    Returns:
+        PredictionResponse with classification results organized by class
+    """
+    print(video_name)
+    try:
+        # Check if video frames exist
+        video_frame_dir = os.path.join(FRAMES_BASE_DIR, video_name,'Normal')
+        if not os.path.exists(video_frame_dir):
+            raise HTTPException(status_code=404, detail=f"No frames found for video: {video_name}")
+
+        # Load model and data
+        model_loaded, val_data_t, val_pil_data, classes, concepts, dataset = load_model_and_data(TRAINED_MODEL_DIR,
+                                                                                                 'cpu',dataset_name = video_name)
+
+        # Create prediction output directory for this video
+        video_prediction_dir = os.path.join(PREDICTIONS_BASE_DIR, video_name)
+        os.makedirs(video_prediction_dir, exist_ok=True)
+
+        # Get frame indices (assuming you want to predict all frames)
+        frame_files = [f for f in os.listdir(video_frame_dir) if f.endswith(('.jpg', '.png'))]
+        frame_indices = list(range(len(frame_files)))
+
+        # Run predictions using your existing function
+        predictions = predict_and_visualize(
+            model_loaded, val_data_t, val_pil_data, classes, concepts,
+            video_prediction_dir, 'cpu', frame_indices
+        )
+
+        # Process and organize predictions
+        predictions_by_class = {}
+        formatted_predictions = []
+
+        for i, prediction in enumerate(predictions):
+            class_name = prediction['class']
+            predictions_by_class[class_name] = predictions_by_class.get(class_name, 0) + 1
+
+            # Add frame_id for feedback tracking
+            frame_id = f"{video_name}_frame_{i}_{uuid.uuid4().hex[:8]}"
+
+            formatted_prediction = {
+                "frame_id": frame_id,
+                "video_name": video_name,
+                "predicted_class": class_name,
+                "confidence": float(prediction['confidence']),
+                "image_path": prediction['filename'].split(BASE_DIR.split('/app')[0])[-1],
+                "ground_truth": prediction.get('ground_truth', 'unknown'),
+                "original_index": prediction['original_index']
+            }
+            formatted_predictions.append(formatted_prediction)
+
+        # Save predictions to file for later retrieval
+        predictions_file = os.path.join(video_prediction_dir, "predictions.json")
+        with open(predictions_file, 'w') as f:
+            json.dump(formatted_predictions, f, indent=2)
+        print(formatted_predictions)
+        return PredictionResponse(
+            status="success",
+            video_name=video_name,
+            total_predictions=len(formatted_predictions),
+            predictions_by_class=predictions_by_class,
+            predictions=formatted_predictions
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error predicting frames: {str(e)}")
+
+
+@app.get("/predictions/{video_name}")
+async def get_video_predictions(
+        video_name: str,
+        include_normal: bool = Query(True, description="Include normal predictions"),
+        class_filter: Optional[str] = Query(None, description="Filter by specific class"),
+        confidence_threshold: Optional[float] = Query(None, description="Minimum confidence threshold")
+):
+    """
+    Retrieve existing predictions for a specific video.
+
+    Args:
+        video_name: Name of the video
+        include_normal: Whether to include normal predictions (default: False)
+        class_filter: Filter results by specific class
+        confidence_threshold: Minimum confidence score to include (0.0-1.0)
+
+    Returns:
+        JSON with existing predictions for the video
+    """
+    try:
+        # Load predictions from file
+        predictions_file = os.path.join(PREDICTIONS_BASE_DIR, video_name, "predictions.json")
+
+        if not os.path.exists(predictions_file):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No predictions found for video '{video_name}'. Please run predictions first."
+            )
+
+        with open(predictions_file, 'r') as f:
+            predictions = json.load(f)
+
+        # Apply filters
+        filtered_predictions = predictions.copy()
+
+        # Filter out normal predictions if not requested
+        if not include_normal:
+            filtered_predictions = [p for p in filtered_predictions if p['predicted_class'].lower() != 'normal']
+
+        # Apply class filter
+        if class_filter:
+            filtered_predictions = [p for p in filtered_predictions if
+                                    p['predicted_class'].lower() == class_filter.lower()]
+
+        # Apply confidence threshold
+        if confidence_threshold is not None:
+            filtered_predictions = [p for p in filtered_predictions if p['confidence'] >= confidence_threshold]
+        print(filtered_predictions)
+        return {
+            "video_name": video_name,
+            "total_predictions": len(predictions),
+            "filtered_predictions": len(filtered_predictions),
+            "filters_applied": {
+                "include_normal": include_normal,
+                "class_filter": class_filter,
+                "confidence_threshold": confidence_threshold
+            },
+            "predictions": filtered_predictions
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving predictions: {str(e)}")
+
+
 @app.post("/feedback/expert", response_model=FeedbackResponse)
 async def submit_expert_feedback(
         frame_image: UploadFile = File(...),
         frame_id: str = Form(...),
+        video_name: str = Form(...),
         model_prediction: str = Form(...),
         expert_classification: str = Form(...),
         confidence_score: Optional[float] = Form(None),
-        expert_notes: Optional[str] = Form(None),
-        pipe_id: Optional[str] = Form(None)
+        expert_notes: Optional[str] = Form(None)
 ):
     """
-    Submit expert feedback for active learning
+    Submit expert feedback for active learning.
 
-    Enhanced version of the original feedback endpoint with proper data organization
-    for retraining the CBM model.
+    Args:
+        frame_image: The frame image file
+        frame_id: Unique frame identifier
+        video_name: Name of the source video
+        model_prediction: Model's original prediction
+        expert_classification: Expert's classification
+        confidence_score: Expert's confidence in their classification
+        expert_notes: Additional notes from expert
+
+    Returns:
+        FeedbackResponse with feedback details and retraining status
     """
     try:
-        # Ensure directories exist
-        base_path = ensure_feedback_directories()
-
-        # Generate unique feedback ID
-        feedback_id = str(uuid.uuid4())
-        timestamp = datetime.now().isoformat()
-
-        # Validate expert classification (adjust these based on your actual classes)
+        # Validate expert classification
         valid_classifications = ["normal", "crack", "corrosion", "leakage"]
         if expert_classification.lower() not in valid_classifications:
             raise HTTPException(
@@ -148,12 +390,16 @@ async def submit_expert_feedback(
                 detail=f"Invalid classification. Must be one of: {valid_classifications}"
             )
 
-        # Save image to appropriate folder
-        classification_folder = base_path / expert_classification.lower()
+        # Generate unique feedback ID
+        feedback_id = str(uuid.uuid4())
+        timestamp = datetime.now().isoformat()
+
+        # Save image to appropriate class folder
+        classification_folder = Path(FEEDBACK_DATA_DIR) / expert_classification.lower()
         image_filename = f"{feedback_id}_{frame_id}.jpg"
         image_path = classification_folder / image_filename
 
-        # Read and save the uploaded image
+        # Save the uploaded image
         contents = await frame_image.read()
         with open(image_path, "wb") as f:
             f.write(contents)
@@ -162,12 +408,12 @@ async def submit_expert_feedback(
         annotation = {
             "feedback_id": feedback_id,
             "frame_id": frame_id,
+            "video_name": video_name,
             "image_path": str(image_path),
             "model_prediction": model_prediction,
             "expert_classification": expert_classification.lower(),
             "confidence_score": confidence_score,
             "expert_notes": expert_notes,
-            "pipe_id": pipe_id,
             "timestamp": timestamp,
             "is_correction": model_prediction.lower() != expert_classification.lower()
         }
@@ -177,7 +423,7 @@ async def submit_expert_feedback(
         annotations.append(annotation)
         save_annotations(annotations)
 
-        # Also save to your existing feedback system for compatibility
+        # Save to existing feedback system for compatibility
         feedback_data = {
             "image_id": frame_id,
             "true_label": expert_classification,
@@ -191,7 +437,7 @@ async def submit_expert_feedback(
 
         return FeedbackResponse(
             status="success",
-            message=f"Expert feedback recorded successfully. Image saved to {classification_folder.name} folder.",
+            message=f"Expert feedback recorded successfully. Image saved to {expert_classification} folder.",
             feedback_id=feedback_id,
             samples_collected=samples_collected,
             ready_for_retrain=ready_for_retrain
@@ -201,21 +447,45 @@ async def submit_expert_feedback(
         raise HTTPException(status_code=500, detail=f"Error processing expert feedback: {str(e)}")
 
 
-# Keep your original feedback endpoint for backward compatibility
-@app.post("/feedback")
-async def feedback(image_id: str = Form(...), true_label: str = Form(...), explanation: str = Form(...)):
-    feedback_data = {
-        "image_id": image_id,
-        "true_label": true_label,
-        "explanation": explanation
-    }
-    save_feedback(feedback_data)
-    return {"status": "Feedback received"}
+@app.post("/retrain")
+async def retrain_model():
+    """
+    Retrain the CBM model using accumulated expert feedback.
+
+    Returns:
+        Status of the retraining process
+    """
+    try:
+        annotations = load_annotations()
+
+        if len(annotations) < RETRAIN_TRIGGER_COUNT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough samples for retraining. Need {RETRAIN_TRIGGER_COUNT}, have {len(annotations)}"
+            )
+
+        # Use active learning data for retraining
+        print(f"Retraining with {len(annotations)} active learning samples")
+        retrain_cbm(FEEDBACK_DATA_DIR, "static/images", "feedback")
+
+        # Reload the model
+        global model
+        model = load_cbm(TRAINED_MODEL_DIR, 'cpu')
+
+        return {
+            "status": "success",
+            "message": "Model retrained successfully",
+            "active_learning_samples": len(annotations),
+            "model_updated": True
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retraining model: {str(e)}")
 
 
 @app.get("/feedback/stats")
 async def get_feedback_stats():
-    """Get statistics about collected expert feedback for active learning"""
+    """Get statistics about collected expert feedback"""
     try:
         annotations = load_annotations()
 
@@ -224,7 +494,10 @@ async def get_feedback_stats():
                 "total_samples": 0,
                 "by_classification": {},
                 "corrections_count": 0,
-                "ready_for_retrain": False
+                "ready_for_retrain": False,
+                "correction_rate":0,
+                "retrain_threshold":0
+
             }
 
         # Count by classification
@@ -251,166 +524,55 @@ async def get_feedback_stats():
         raise HTTPException(status_code=500, detail=f"Error getting feedback stats: {str(e)}")
 
 
-@app.post("/feedback/prepare_retrain")
-async def prepare_for_retraining():
-    """Prepare active learning data for CBM model retraining"""
+@app.get("/videos")
+async def list_processed_videos():
+    """List all processed videos and their status"""
     try:
-        annotations = load_annotations()
+        videos = []
 
-        if len(annotations) < RETRAIN_TRIGGER_COUNT:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Not enough samples for retraining. Need {RETRAIN_TRIGGER_COUNT}, have {len(annotations)}"
-            )
+        # Check frames directory
+        if os.path.exists(FRAMES_BASE_DIR):
+            for video_dir in os.listdir(FRAMES_BASE_DIR):
+                video_path = os.path.join(FRAMES_BASE_DIR, video_dir)
+                if os.path.isdir(video_path):
+                    frame_count = len([f for f in os.listdir(video_path) if f.endswith(('.jpg', '.png'))])
 
-        # Create training data structure
-        training_data = {
-            "annotations": annotations,
-            "data_directory": FEEDBACK_DATA_DIR,
-            "total_samples": len(annotations),
-            "created_at": datetime.now().isoformat(),
-            "class_distribution": {}
-        }
+                    # Check if predictions exist
+                    predictions_path = os.path.join(PREDICTIONS_BASE_DIR, video_dir, "predictions.json")
+                    has_predictions = os.path.exists(predictions_path)
 
-        # Calculate class distribution
-        for annotation in annotations:
-            cls = annotation["expert_classification"]
-            training_data["class_distribution"][cls] = training_data["class_distribution"].get(cls, 0) + 1
+                    prediction_count = 0
+                    if has_predictions:
+                        with open(predictions_path, 'r') as f:
+                            predictions = json.load(f)
+                            prediction_count = len(predictions)
 
-        # Save training configuration
-        training_config_path = Path(FEEDBACK_DATA_DIR) / "training_config.json"
-        with open(training_config_path, 'w') as f:
-            json.dump(training_data, f, indent=2)
+                    videos.append({
+                        "video_name": video_dir,
+                        "frame_count": frame_count,
+                        "has_predictions": has_predictions,
+                        "prediction_count": prediction_count
+                    })
 
         return {
-            "status": "ready",
-            "message": "Active learning data prepared for retraining",
-            "config_file": str(training_config_path),
-            "total_samples": len(annotations),
-            "class_distribution": training_data["class_distribution"]
+            "total_videos": len(videos),
+            "videos": videos
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error preparing for retraining: {str(e)}")
-
-
-@app.post("/retrain")
-async def retrain():
-    """Enhanced retrain endpoint that can use active learning data"""
-    try:
-        # Check if we have active learning data ready
-        annotations = load_annotations()
-
-        if len(annotations) >= RETRAIN_TRIGGER_COUNT:
-            # Use active learning data for retraining
-            print(f"Retraining with {len(annotations)} active learning samples")
-            retrain_cbm(FEEDBACK_DATA_DIR, "static/images", "feedback")
-        else:
-            # Fall back to original retraining method
-            print("Using original retraining method")
-            retrain_cbm("data", "static/images", "feedback")
-
-        # Reload the model
-        global model
-        model = load_cbm(TRAINED_MODEL_DIR, 'cpu')
-
-        return {
-            "status": "Model retrained successfully",
-            "active_learning_samples": len(annotations),
-            "used_active_learning": len(annotations) >= RETRAIN_TRIGGER_COUNT
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/query_uncertain")
-async def query_uncertain(n: int = 5):
-    paths = [os.path.join("sample_pool", p) for p in os.listdir("sample_pool") if p.endswith(".png")]
-    return model.rank_uncertain_samples(paths, top_n=n)
-
-
-# Video processing endpoints (unchanged)
-VIDEO_UPLOAD_FOLDER = "shared_data/videos_to_frame"
-PROCESSED_OUTPUT_FOLDER = "shared_data/multi_train/Normal"
-
-os.makedirs(VIDEO_UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(PROCESSED_OUTPUT_FOLDER, exist_ok=True)
-
-
-@app.post("/upload_video/")
-async def upload_video(file: UploadFile = File(...)):
-    """
-    Accepts a video file, saves it, processes it using Grad-CAM + CBM logic, and returns results.
-    """
-    video_path = os.path.join(VIDEO_UPLOAD_FOLDER, file.filename)
-
-    with open(video_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    video_name = os.path.splitext(file.filename)[0]
-
-    try:
-        results = process_video(video_path, PROCESSED_OUTPUT_FOLDER, video_name, frame_interval=30)
-        print(results)
-
-        # Format results for JSON with frame IDs for potential feedback
-        formatted_results = [
-            {
-                "frame_path": path,
-                "frame_id": f"video_{video_name}_frame_{i}_{uuid.uuid4().hex[:8]}"
-            } for i, path in enumerate(results)
-        ]
-
-        return JSONResponse(content={"results": formatted_results}, status_code=200)
-
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-# Utility endpoints for active learning management
-@app.get("/feedback/{feedback_id}")
-async def get_feedback_details(feedback_id: str):
-    """Get details of a specific feedback entry"""
-    try:
-        annotations = load_annotations()
-
-        for annotation in annotations:
-            if annotation["feedback_id"] == feedback_id:
-                return annotation
-
-        raise HTTPException(status_code=404, detail="Feedback not found")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving feedback: {str(e)}")
-
-
-@app.delete("/feedback/reset")
-async def reset_feedback_data():
-    """Reset all active learning feedback data (use with caution)"""
-    try:
-        base_path = Path(FEEDBACK_DATA_DIR)
-        if base_path.exists():
-            shutil.rmtree(base_path)
-
-        ensure_feedback_directories()
-
-        return {
-            "status": "success",
-            "message": "All active learning feedback data has been reset"
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error resetting feedback data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error listing videos: {str(e)}")
 
 
 # Initialize directories on startup
 @app.on_event("startup")
 async def startup_event():
-    ensure_feedback_directories()
-    print(f"Active Learning Feedback System initialized")
+    ensure_directories()
+    print(f"CBM Video Processing API initialized")
+    print(f"Video upload directory: {VIDEO_UPLOAD_DIR}")
+    print(f"Frames base directory: {FRAMES_BASE_DIR}")
+    print(f"Predictions base directory: {PREDICTIONS_BASE_DIR}")
     print(f"Feedback data directory: {FEEDBACK_DATA_DIR}")
-    print(f"Current sample count: {get_sample_count()}")
-    print(f"Retrain threshold: {RETRAIN_TRIGGER_COUNT}")
+    print(f"Trained model directory: {TRAINED_MODEL_DIR}")
 
 
 if __name__ == "__main__":

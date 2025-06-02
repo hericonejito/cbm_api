@@ -34,7 +34,7 @@ def extract_frames(video_path, output_folder, frame_interval=10):
         if frame_number % frame_interval == 0 and success:
             frame_path = os.path.join(output_folder, f"frame_{frame_number}.jpg")
             cv2.imwrite(frame_path, frame)
-            frames.append((frame_path, frame))
+            frames.append(frame_path)
         frame_number += 1
 
     cap.release()
@@ -130,7 +130,7 @@ def label_outlier_types(outlier_embeddings, num_clusters=3):
 
 def process_video(video_path, output_folder,video_name, frame_interval=10):
     """Processes a video and classifies frames as outliers or not."""
-    print("Extracting frames...")
+    # print("Extracting frames... " + video_path)
     frames = extract_frames(video_path, output_folder, frame_interval)
 
     # print("Loading model...")
@@ -159,49 +159,49 @@ def process_video(video_path, output_folder,video_name, frame_interval=10):
     # outlier_embeddings = embeddings[outlier_indices]
     # outlier_labels = label_outlier_types(outlier_embeddings)
     #
-    results = []
-    # outlier_counter = 0
-    for frame_path, frame in frames:
-        dataset_folder = os.path.join(output_folder, "images")
-        # outlier_folder = os.path.join(outlier_folder, outlier_labels[outlier_counter])
-        os.makedirs(dataset_folder, exist_ok=True)
+    # results = []
+    # # outlier_counter = 0
+    # for frame_path, frame in frames:
+    #     dataset_folder = os.path.join(output_folder, "images")
+    #     # outlier_folder = os.path.join(outlier_folder, outlier_labels[outlier_counter])
+    #     os.makedirs(dataset_folder, exist_ok=True)
+    #
+    #     frame_save_path = os.path.join(dataset_folder, f"{video_name}_{frame_path.split('/')[-1]}")
+    #     # heatmap_save_path = os.path.join(outlier_folder, f"{video_name}_frame_{i}_heatmap.jpg")
+    #
+    #     cv2.imwrite(frame_save_path, frame)
+    # # for i, ((frame_path, frame), prediction, heatmap) in enumerate(zip(frames, predictions, heatmaps)):
+    # #     if prediction == -1:
+    # #         for z in ['train','test']:
+    # #             label = f"Outlier ({outlier_labels[outlier_counter]})"
+    # #             outlier_folder = os.path.join(output_folder, z)
+    # #             outlier_folder = os.path.join(outlier_folder, outlier_labels[outlier_counter])
+    # #             os.makedirs(outlier_folder, exist_ok=True)
+    # #
+    # #             frame_save_path = os.path.join(outlier_folder, f"{video_name}_frame_{i}.jpg")
+    # #             # heatmap_save_path = os.path.join(outlier_folder, f"{video_name}_frame_{i}_heatmap.jpg")
+    # #
+    # #             cv2.imwrite(frame_save_path, frame)
+    # #             # visualize_heatmap(frame, heatmap, heatmap_save_path, label)
+    # #
+    # #         outlier_counter += 1
+    # #     else:
+    # #         for z in ['train','test']:
+    # #             label = "Normal"
+    # #             normal_folder = os.path .join(output_folder, z)
+    # #             normal_folder = os.path .join(normal_folder, "Normal")
+    # #             os.makedirs(normal_folder, exist_ok=True)
+    # #
+    # #             frame_save_path = os.path.join(normal_folder, f"{video_name}_frame_{i}.jpg")
+    # #             # heatmap_save_path = os.path.join(normal_folder, f"{video_name}_frame_{i}_heatmap.jpg")
+    # #
+    # #             cv2.imwrite(frame_save_path, frame)
+    # #             # visualize_heatmap(frame, heatmap, heatmap_save_path, label)
+    #
+    #     results.append(frame_path)
+    #     print(f"Frame: {frame_path}")
 
-        frame_save_path = os.path.join(dataset_folder, f"{video_name}_{frame}.jpg")
-        # heatmap_save_path = os.path.join(outlier_folder, f"{video_name}_frame_{i}_heatmap.jpg")
-
-        cv2.imwrite(frame_save_path, frame)
-    # for i, ((frame_path, frame), prediction, heatmap) in enumerate(zip(frames, predictions, heatmaps)):
-    #     if prediction == -1:
-    #         for z in ['train','test']:
-    #             label = f"Outlier ({outlier_labels[outlier_counter]})"
-    #             outlier_folder = os.path.join(output_folder, z)
-    #             outlier_folder = os.path.join(outlier_folder, outlier_labels[outlier_counter])
-    #             os.makedirs(outlier_folder, exist_ok=True)
-    #
-    #             frame_save_path = os.path.join(outlier_folder, f"{video_name}_frame_{i}.jpg")
-    #             # heatmap_save_path = os.path.join(outlier_folder, f"{video_name}_frame_{i}_heatmap.jpg")
-    #
-    #             cv2.imwrite(frame_save_path, frame)
-    #             # visualize_heatmap(frame, heatmap, heatmap_save_path, label)
-    #
-    #         outlier_counter += 1
-    #     else:
-    #         for z in ['train','test']:
-    #             label = "Normal"
-    #             normal_folder = os.path .join(output_folder, z)
-    #             normal_folder = os.path .join(normal_folder, "Normal")
-    #             os.makedirs(normal_folder, exist_ok=True)
-    #
-    #             frame_save_path = os.path.join(normal_folder, f"{video_name}_frame_{i}.jpg")
-    #             # heatmap_save_path = os.path.join(normal_folder, f"{video_name}_frame_{i}_heatmap.jpg")
-    #
-    #             cv2.imwrite(frame_save_path, frame)
-    #             # visualize_heatmap(frame, heatmap, heatmap_save_path, label)
-
-        results.append(frame_path)
-        print(f"Frame: {frame_path}")
-
-    return results
+    return frames
 
 if __name__ == "__main__":
     for video_name in ['input_video','input_file_5044','input_file_209']: #The video file names that we want to be framed
