@@ -267,6 +267,8 @@ async def predict_video_frames(video_name: str):
             formatted_prediction = {
                 "frame_id": frame_id,
                 "video_name": video_name,
+                "features":prediction['features'],
+                "values":prediction['values'],
                 "predicted_class": class_name,
                 "confidence": float(prediction['confidence']),
                 "image_path": prediction['filename'].split(BASE_DIR.split('/app')[0])[-1],
