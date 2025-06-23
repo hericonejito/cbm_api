@@ -54,11 +54,13 @@ def load_model_and_data(model_dir, device, video_name=None, dataset_name='multi_
     model = cbm_model.load_cbm(model_dir, device)
 
     # Load classes
-    cls_file = f"../shared_data/classes.txt"
-    with open(cls_file, 'r') as f:
+    # cls_file = f"{shared_data_dir}/classes.txt"
+    with open(os.path.join(shared_data_dir,'classes.txt'), 'r') as f:
+        # print(cls_file)
         classes = f.read().split('\n')
 
     # Load concepts
+    # print(model_dir)
     with open(os.path.join(model_dir, 'concepts.txt'), 'r') as f:
         concepts = f.read().split('\n')
     dataset_folder = shared_data_dir / "video_frames"/dataset_name
@@ -233,16 +235,16 @@ def predict_and_visualize(model, val_data_t, val_pil_data, classes, concepts, da
                 values = contributions.cpu().numpy()
 
                 # Only add non-normal predictions to the results
-                if classes[top_classes[k]] != "Normal":
-                    predictions.append({
-                        "filename": filename,
-                        "class": classes[top_classes[k]],
-                        "features": feature_names,
-                        "values": values,
-                        "confidence": f'{conf[top_classes[k]]:.3f}',
-                        "original_index": i,
-                        "ground_truth": classes[int(label)]
-                    })
+                # if classes[top_classes[k]] != "Normal":
+                predictions.append({
+                    "filename": filename,
+                    "class": classes[top_classes[k]],
+                    "features": feature_names,
+                    "values": values,
+                    "confidence": f'{conf[top_classes[k]]:.3f}',
+                    "original_index": i,
+                    "ground_truth": classes[int(label)]
+                })
 
     # Print summary of organized files
     print("\nFile organization summary:")

@@ -263,15 +263,17 @@ async def predict_video_frames(video_name: str):
 
             # Add frame_id for feedback tracking
             frame_id = f"{video_name}_frame_{i}_{uuid.uuid4().hex[:8]}"
-
+            print(prediction['filename'])
+            print(BASE_DIR)
             formatted_prediction = {
                 "frame_id": frame_id,
                 "video_name": video_name,
-                "features":prediction['features'],
-                "values":prediction['values'],
+                "features":json.dumps(prediction['features']),
+                "values":json.dumps(prediction['values'].tolist()),
                 "predicted_class": class_name,
                 "confidence": float(prediction['confidence']),
-                "image_path": prediction['filename'].split(BASE_DIR.split('/app')[0])[-1],
+                "image_path": prediction['filename'].split('/app')[-1],
+                # "image_path": prediction['filename'].split(BASE_DIR.split('/app')[0])[-1],
                 "ground_truth": prediction.get('ground_truth', 'unknown'),
                 "original_index": prediction['original_index']
             }

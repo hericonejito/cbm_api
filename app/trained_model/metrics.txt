@@ -2,18 +2,18 @@
   "lam": 0.0007070707070707071,
   "lr": 0.10000000149011612,
   "alpha": 0.99,
-  "time": 10.379255056381226,
+  "time": 7.380694150924683,
   "metrics": {
-    "loss_tr": 0.4002806842327118,
-    "acc_tr": 0.898980975151062,
-    "loss_val": 0.4002806842327118,
-    "acc_val": 0.898980975151062,
+    "loss_tr": 0.40377476811408997,
+    "acc_tr": 0.8985378742218018,
+    "loss_val": 0.40377479791641235,
+    "acc_val": 0.8985378742218018,
     "loss_test": -1,
     "acc_test": -1
   },
   "sparsity": {
-    "Non-zero weights": 18,
+    "Non-zero weights": 20,
     "Total weights": 20,
-    "Percentage non-zero": 0.9
+    "Percentage non-zero": 1.0
   }
 }
