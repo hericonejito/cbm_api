@@ -1,5 +1,10 @@
-Damp or wet surface area
-Surface scaling or blistering
-Pooling or puddling of liquid
-Crumbling or pitted areas
-Discoloration or water stains
+Surface damage
+Discontinuous surface_PATTERN
+Variation in surface texture
+Type of Anomaly:
+Water path interruption
+Misaligned or horizontal trunk
+Often cylindrical trunk shape
+Unusual wet spots or puddles
+Exposed root system
+Irregular, pitted marks
