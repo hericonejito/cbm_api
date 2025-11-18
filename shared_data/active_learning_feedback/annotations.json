@@ -1,0 +1,14 @@
+[
+  {
+    "feedback_id": "6105d779-9aa0-4028-8d56-50fdd875dd3e",
+    "frame_id": "input_file_5007_78ef893b-0247-4b3d-a2ce-c43c1a0366a9_bdad9fc3-165e-4fb8-9756-a3fd50093734_frame_279_ead2f240",
+    "video_name": "input_file_5007_78ef893b-0247-4b3d-a2ce-c43c1a0366a9_bdad9fc3-165e-4fb8-9756-a3fd50093734",
+    "image_path": "/app/shared_data/active_learning_feedback/crack/6105d779-9aa0-4028-8d56-50fdd875dd3e_input_file_5007_78ef893b-0247-4b3d-a2ce-c43c1a0366a9_bdad9fc3-165e-4fb8-9756-a3fd50093734_frame_279_ead2f240.jpg",
+    "model_prediction": "Leakage",
+    "expert_classification": "crack",
+    "confidence_score": 0.9,
+    "expert_notes": "",
+    "timestamp": "2025-11-14T16:27:22.222184",
+    "is_correction": true
+  }
+]
