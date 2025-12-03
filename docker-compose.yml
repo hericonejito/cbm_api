@@ -4,13 +4,26 @@ services:
   cbm-api:
     build: .
     ports:
-      - "0.0.0.0:8000:8000"  # Bind to all interfaces
+      - "8000:8000"
     volumes:
-      # Mount shared data directory for persistence
       - ./shared_data:/app/shared_data
-      # Mount trained model directory inside app folder
       - ./app/trained_model:/app/app/trained_model
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  cbm-streamlit:
+    build: .
+    command: streamlit run streamlit/streamlit_ui.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./shared_data:/app/shared_data
+    environment:
+      - API_BASE_URL=http://cbm-api:8000
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - cbm-api
     restart: unless-stopped

@@ -384,7 +384,14 @@ class UIComponents:
                 # Display frame image
                 try:
                     image_url = f"{API_BASE_URL}{prediction['image_path']}"
-                    st.image(image_url, caption=f"Frame {index + 1}", use_container_width=True)
+                    # Fetch image from API server-side
+                    image_response = requests.get(image_url)
+                    if image_response.status_code == 200:
+                        image = Image.open(io.BytesIO(image_response.content))
+                        st.image(image, caption=f"Frame {index + 1}", use_container_width=True)
+                    else:
+                        st.error(f"Could not load image (status: {image_response.status_code})")
+                        st.code(prediction['image_path'])
 
                     # Display prediction metrics
                     st.metric("Confidence", f"{confidence:.1%}")
@@ -393,8 +400,8 @@ class UIComponents:
                     if prediction.get('ground_truth') and prediction['ground_truth'] != 'unknown':
                         st.metric("Ground Truth", prediction['ground_truth'].title())
 
-                except Exception:
-                    st.error("Could not load image")
+                except Exception as e:
+                    st.error(f"Could not load image: {str(e)}")
                     st.code(prediction['image_path'])
 
             with col2:
@@ -1055,8 +1062,14 @@ def render_quick_review_mode(predictions: List[Dict], start_idx: int):
 
             with col2:
                 try:
-                    image_url = f"{API_BASE_URL}/{prediction['image_path']}"
-                    st.image(image_url, width=100)
+                    image_url = f"{API_BASE_URL}{prediction['image_path']}"
+                    # Fetch image from API server-side
+                    image_response = requests.get(image_url)
+                    if image_response.status_code == 200:
+                        image = Image.open(io.BytesIO(image_response.content))
+                        st.image(image, width=100)
+                    else:
+                        st.write("Image unavailable")
                 except:
                     st.write("Image unavailable")
 
@@ -1099,8 +1112,14 @@ def render_detailed_analysis_mode(predictions: List[Dict], start_idx: int):
             with col1:
                 # Enhanced image display
                 try:
-                    image_url = f"{API_BASE_URL}/{prediction['image_path']}"
-                    st.image(image_url, caption=f"Frame {start_idx + i + 1}", use_container_width=True)
+                    image_url = f"{API_BASE_URL}{prediction['image_path']}"
+                    # Fetch image from API server-side
+                    image_response = requests.get(image_url)
+                    if image_response.status_code == 200:
+                        image = Image.open(io.BytesIO(image_response.content))
+                        st.image(image, caption=f"Frame {start_idx + i + 1}", use_container_width=True)
+                    else:
+                        st.error(f"Could not load image (status: {image_response.status_code})")
 
                     # Image analysis tools
                     st.markdown("**Image Analysis Tools:**")
@@ -1112,8 +1131,8 @@ def render_detailed_analysis_mode(predictions: List[Dict], start_idx: int):
                         if st.button("📏 Measure", key=f"measure_{prediction['frame_id']}"):
                             st.info("Measurement tools coming soon")
 
-                except:
-                    st.error("Could not load image")
+                except Exception as e:
+                    st.error(f"Could not load image: {str(e)}")
 
             with col2:
                 # Comprehensive feedback form
