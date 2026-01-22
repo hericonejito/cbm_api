@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python -c \"from app.retrain import retrain_cbm; print\\(''''Import successful''''\\)\")",
+      "Bash(python -c:*)",
+      "Bash(chmod:*)"
+    ]
+  }
+}

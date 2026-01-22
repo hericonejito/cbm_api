@@ -8,9 +8,16 @@ services:
     volumes:
       - ./shared_data:/app/shared_data
       - ./app/trained_model:/app/app/trained_model
+      - ./app/users.json:/app/app/users.json
+      - ./certs:/app/certs:ro  # Mount SSL certificates (read-only)
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
+      # IMPORTANT: Change this secret in production!
+      # Generate with: openssl rand -hex 32
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-this-secret-key-in-production}
+      - SSL_KEYFILE=/app/certs/key.pem
+      - SSL_CERTFILE=/app/certs/cert.pem
     restart: unless-stopped
 
   cbm-streamlit:
@@ -21,7 +28,8 @@ services:
     volumes:
       - ./shared_data:/app/shared_data
     environment:
-      - API_BASE_URL=http://cbm-api:8000
+      # Use HTTPS if certificates are configured
+      - API_BASE_URL=${API_BASE_URL:-http://cbm-api:8000}
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
     depends_on:

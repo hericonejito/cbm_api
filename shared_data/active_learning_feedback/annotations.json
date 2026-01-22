@@ -10,5 +10,17 @@
     "expert_notes": "",
     "timestamp": "2025-11-14T16:27:22.222184",
     "is_correction": true
+  },
+  {
+    "feedback_id": "742677e6-9be6-4756-8e0b-076e3030dd47",
+    "frame_id": "input_file_5008_89c2a69e-5002-45c7-826d-477d6288c5e2_frame_6_eae37df6",
+    "video_name": "input_file_5008_89c2a69e-5002-45c7-826d-477d6288c5e2",
+    "image_path": "/app/shared_data/active_learning_feedback/normal/742677e6-9be6-4756-8e0b-076e3030dd47_input_file_5008_89c2a69e-5002-45c7-826d-477d6288c5e2_frame_6_eae37df6.jpg",
+    "model_prediction": "Corrosion",
+    "expert_classification": "normal",
+    "confidence_score": 0.9,
+    "expert_notes": "",
+    "timestamp": "2025-12-03T15:30:03.288162",
+    "is_correction": true
   }
 ]

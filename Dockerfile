@@ -27,8 +27,19 @@ RUN mkdir -p /app/shared_data/videos_to_frame \
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Expose the port the app runs on
-EXPOSE 8000
+# JWT Secret Key - CHANGE THIS IN PRODUCTION!
+# Generate with: openssl rand -hex 32
+ENV JWT_SECRET_KEY="change-this-secret-key-in-production-use-openssl-rand-hex-32"
 
-# Command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# SSL Certificate paths (optional - for HTTPS)
+ENV SSL_KEYFILE=/app/certs/key.pem
+ENV SSL_CERTFILE=/app/certs/cert.pem
+
+# Create certs directory
+RUN mkdir -p /app/certs
+
+# Expose the port the app runs on (8000 for HTTP, 8443 for HTTPS)
+EXPOSE 8000 8443
+
+# Command to run the application with HTTPS if certs exist
+CMD ["sh", "-c", "if [ -f /app/certs/key.pem ] && [ -f /app/certs/cert.pem ]; then uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/certs/key.pem --ssl-certfile=/app/certs/cert.pem; else uvicorn app.main:app --host 0.0.0.0 --port 8000; fi"]

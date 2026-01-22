@@ -13,10 +13,15 @@ from typing import Dict, List, Optional
 import base64
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+# API_BASE_URL = os.getenv("API_BASE_URL", "https://cbm-api-xr50.euprojects.net")
+# For localhost, use HTTP unless you have SSL certificates configured
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 VALID_VIDEO_FORMATS = ['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv']
 VALID_IMAGE_FORMATS = ['png', 'jpg', 'jpeg']
 CLASSIFICATION_CLASSES = ["normal", "crack", "corrosion", "leakage"]
+
+# Session timeout in seconds (30 minutes)
+SESSION_TIMEOUT = 1800
 
 # Page configuration
 st.set_page_config(
@@ -75,21 +80,147 @@ st.markdown("""
 
 
 class APIClient:
-    """Centralized API client for all backend communications"""
+    """Centralized API client for all backend communications with OAuth2 support"""
 
     def __init__(self, base_url: str):
         self.base_url = base_url
         self.session = requests.Session()
+        self._token = None
+
+    def set_token(self, token: str):
+        """Set the authentication token"""
+        self._token = token
+        self.session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def clear_token(self):
+        """Clear the authentication token"""
+        self._token = None
+        self.session.headers.pop("Authorization", None)
+
+    def is_authenticated(self) -> bool:
+        """Check if client has a token set"""
+        return self._token is not None
+
+    def login(self, username: str, password: str) -> Dict:
+        """Authenticate user and get JWT token"""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/token",
+                data={"username": username, "password": password},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                try:
+                    token_data = response.json()
+                    self.set_token(token_data["access_token"])
+                    return {"success": True, "data": token_data}
+                except ValueError as e:
+                    return {"success": False, "error": f"Invalid response from server: {str(e)}"}
+            else:
+                # Handle non-200 responses more gracefully
+                error_message = "Authentication failed"
+                try:
+                    if response.text:
+                        error_data = response.json()
+                        error_message = error_data.get("detail", error_message)
+                except (ValueError, json.JSONDecodeError):
+                    # Response is not JSON, use status code and text
+                    if response.status_code == 401:
+                        error_message = "Invalid username or password"
+                    elif response.status_code == 404:
+                        error_message = f"API endpoint not found. Check if API is running at {self.base_url}"
+                    elif response.status_code >= 500:
+                        error_message = f"Server error (Status {response.status_code})"
+                    else:
+                        error_message = f"Request failed (Status {response.status_code}): {response.text[:200]}"
+                
+                return {"success": False, "error": error_message}
+
+        except requests.exceptions.ConnectionError:
+            return {"success": False, "error": f"Cannot connect to API at {self.base_url}. Please check if the API server is running."}
+        except requests.exceptions.Timeout:
+            return {"success": False, "error": "Request timed out. The API server may be slow or unavailable."}
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": f"Network error: {str(e)}"}
+        except Exception as e:
+            return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
+    def get_current_user(self) -> Dict:
+        """Get current authenticated user info"""
+        try:
+            response = self.session.get(f"{self.base_url}/users/me", timeout=5)
+
+            if response.status_code == 200:
+                return {"success": True, "data": response.json()}
+            elif response.status_code == 401:
+                return {"success": False, "error": "Session expired. Please login again."}
+            else:
+                return {"success": False, "error": response.text}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def change_password(self, current_password: str, new_password: str) -> Dict:
+        """Change user password"""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/users/change-password",
+                json={"current_password": current_password, "new_password": new_password},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                try:
+                    return {"success": True, "data": response.json()}
+                except (ValueError, json.JSONDecodeError):
+                    return {"success": False, "error": "Invalid response from server"}
+            else:
+                # Handle non-200 responses more gracefully
+                error_message = "Password change failed"
+                try:
+                    if response.text:
+                        error_data = response.json()
+                        error_message = error_data.get("detail", error_message)
+                except (ValueError, json.JSONDecodeError):
+                    if response.status_code == 401:
+                        error_message = "Current password is incorrect"
+                    elif response.status_code >= 500:
+                        error_message = f"Server error (Status {response.status_code})"
+                    else:
+                        error_message = f"Request failed (Status {response.status_code}): {response.text[:200]}"
+                
+                return {"success": False, "error": error_message}
+
+        except requests.exceptions.ConnectionError:
+            return {"success": False, "error": f"Cannot connect to API at {self.base_url}"}
+        except requests.exceptions.Timeout:
+            return {"success": False, "error": "Request timed out"}
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": f"Network error: {str(e)}"}
+        except Exception as e:
+            return {"success": False, "error": f"Unexpected error: {str(e)}"}
 
     def health_check(self) -> Dict:
         """Check API health and connectivity"""
         try:
-            response = self.session.get(f"{self.base_url}/feedback/stats", timeout=5)
-            return {
-                "status": "connected" if response.status_code == 200 else "error",
-                "status_code": response.status_code,
-                "data": response.json() if response.status_code == 200 else None
-            }
+            # Use a public endpoint or check with auth
+            if self._token:
+                response = self.session.get(f"{self.base_url}/feedback/stats", timeout=5)
+                return {
+                    "status": "connected" if response.status_code == 200 else "error",
+                    "status_code": response.status_code,
+                    "data": response.json() if response.status_code == 200 else None
+                }
+            else:
+                # Just check if server is reachable
+                response = requests.get(f"{self.base_url}/docs", timeout=5)
+                return {
+                    "status": "connected" if response.status_code == 200 else "error",
+                    "status_code": response.status_code,
+                    "data": None
+                }
         except Exception as e:
             return {"status": "disconnected", "error": str(e)}
 
@@ -239,12 +370,67 @@ class SessionManager:
                 'include_normal': False,
                 'class_filter': None,
                 'confidence_threshold': None
-            }
+            },
+            # Authentication state
+            'authenticated': False,
+            'user': None,
+            'token': None,
+            'login_time': None
         }
 
         for key, value in defaults.items():
             if key not in st.session_state:
                 st.session_state[key] = value
+
+        # Restore token if exists
+        if st.session_state.token and not st.session_state.api_client.is_authenticated():
+            st.session_state.api_client.set_token(st.session_state.token)
+
+    @staticmethod
+    def login(username: str, password: str) -> Dict:
+        """Authenticate user"""
+        result = st.session_state.api_client.login(username, password)
+
+        if result["success"]:
+            st.session_state.authenticated = True
+            st.session_state.token = result["data"]["access_token"]
+            st.session_state.login_time = time.time()
+
+            # Get user info
+            user_result = st.session_state.api_client.get_current_user()
+            if user_result["success"]:
+                st.session_state.user = user_result["data"]
+
+        return result
+
+    @staticmethod
+    def logout():
+        """Logout current user"""
+        st.session_state.api_client.clear_token()
+        st.session_state.authenticated = False
+        st.session_state.user = None
+        st.session_state.token = None
+        st.session_state.login_time = None
+
+    @staticmethod
+    def is_authenticated() -> bool:
+        """Check if user is authenticated and session is valid"""
+        if not st.session_state.authenticated:
+            return False
+
+        # Check session timeout
+        if st.session_state.login_time:
+            elapsed = time.time() - st.session_state.login_time
+            if elapsed > SESSION_TIMEOUT:
+                SessionManager.logout()
+                return False
+
+        return True
+
+    @staticmethod
+    def get_current_user() -> Optional[Dict]:
+        """Get current user info"""
+        return st.session_state.user
 
     @staticmethod
     def clear_video_data():
@@ -1594,10 +1780,127 @@ def start_model_retraining(backup_current: bool, use_all_data: bool,
             st.error(f"❌ Retraining failed: {result['error']}")
 
 
+def render_login_page():
+    """Render the login page"""
+    st.markdown('<h1 class="main-header">🔐 CBM Expert Feedback System</h1>', unsafe_allow_html=True)
+    st.markdown("### Please login to continue")
+
+    # Center the login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        with st.form("login_form"):
+            st.markdown("#### Enter your credentials")
+
+            username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                remember_me = st.checkbox("Remember me")
+            with col_b:
+                pass
+
+            submitted = st.form_submit_button("🔑 Login", type="primary", use_container_width=True)
+
+            if submitted:
+                if not username or not password:
+                    st.error("Please enter both username and password")
+                else:
+                    with st.spinner("Authenticating..."):
+                        result = SessionManager.login(username, password)
+
+                        if result["success"]:
+                            st.success("✅ Login successful!")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Login failed: {result['error']}")
+
+        # Help text
+        st.markdown("---")
+        st.markdown("**Need help?**")
+        st.caption("Contact your administrator if you've forgotten your credentials.")
+
+        # Connection status
+        st.markdown("---")
+        health = st.session_state.api_client.health_check()
+        if health["status"] == "connected":
+            st.success("🟢 API Server Connected")
+        else:
+            st.error(f"🔴 API Server Disconnected: {health.get('error', 'Unknown error')}")
+
+
+def render_user_menu():
+    """Render user menu in sidebar"""
+    user = SessionManager.get_current_user()
+
+    if user:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown(f"### 👤 {user.get('full_name', user.get('username', 'User'))}")
+        st.sidebar.caption(f"@{user.get('username', 'unknown')}")
+
+        # User permissions
+        permissions = user.get('permissions', [])
+        if 'admin' in permissions:
+            st.sidebar.caption("🔑 Administrator")
+
+        # Account actions
+        with st.sidebar.expander("⚙️ Account"):
+            if st.button("🔄 Change Password", use_container_width=True):
+                st.session_state.show_password_change = True
+
+            if st.button("🚪 Logout", type="secondary", use_container_width=True):
+                SessionManager.logout()
+                st.rerun()
+
+        # Password change dialog
+        if st.session_state.get('show_password_change', False):
+            render_password_change_dialog()
+
+
+def render_password_change_dialog():
+    """Render password change dialog"""
+    with st.sidebar.form("password_change_form"):
+        st.markdown("#### Change Password")
+        current_password = st.text_input("Current Password", type="password")
+        new_password = st.text_input("New Password", type="password")
+        confirm_password = st.text_input("Confirm New Password", type="password")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.form_submit_button("Save"):
+                if new_password != confirm_password:
+                    st.error("Passwords don't match")
+                elif len(new_password) < 8:
+                    st.error("Password must be at least 8 characters")
+                else:
+                    result = st.session_state.api_client.change_password(current_password, new_password)
+                    if result["success"]:
+                        st.success("Password changed!")
+                        st.session_state.show_password_change = False
+                        st.rerun()
+                    else:
+                        st.error(result["error"])
+
+        with col2:
+            if st.form_submit_button("Cancel"):
+                st.session_state.show_password_change = False
+                st.rerun()
+
+
 def main():
     """Main application entry point"""
     # Initialize session
     SessionManager.init_session()
+
+    # Check authentication
+    if not SessionManager.is_authenticated():
+        render_login_page()
+        return
+
+    # Render user menu
+    render_user_menu()
 
     # Render status indicator
     UIComponents.render_status_indicator()

@@ -6,9 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
 # Import your existing modules
@@ -17,7 +18,13 @@ from app.feedback_manager import save_feedback
 from app.retrain import retrain_cbm
 from app.video_processor import process_video
 from app.intervention import load_model_and_data, predict_and_visualize
+from app.auth import (
+    Token, User, UserCreate, PasswordChange,
+    authenticate_user, create_access_token, get_current_active_user,
+    require_permissions, create_user, change_password, ACCESS_TOKEN_EXPIRE_MINUTES
+)
 import numpy as np
+from datetime import timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
 # Right after creating the FastAPI app instance
@@ -102,7 +109,70 @@ class FeedbackResponse(BaseModel):
     ready_for_retrain: bool
 
 
+# ============================================================================
+# Authentication Endpoints
+# ============================================================================
+
+@app.post("/token", response_model=Token, tags=["Authentication"])
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    OAuth2 compatible token login endpoint.
+
+    Send username and password to receive a JWT access token.
+    Use the token in the Authorization header as: Bearer <token>
+
+    Default users: stergios, dimitris (password: changeme123)
+    """
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username, "permissions": user.permissions},
+        expires_delta=access_token_expires
+    )
+
+    return Token(access_token=access_token, token_type="bearer")
+
+
+@app.get("/users/me", response_model=User, tags=["Authentication"])
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
+    """Get current authenticated user information."""
+    return current_user
+
+
+@app.post("/users/change-password", tags=["Authentication"])
+async def change_user_password(
+    password_data: PasswordChange,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Change the current user's password."""
+    change_password(
+        current_user.username,
+        password_data.current_password,
+        password_data.new_password
+    )
+    return {"status": "success", "message": "Password changed successfully"}
+
+
+@app.post("/users/create", response_model=User, tags=["Authentication"])
+async def create_new_user(
+    user_data: UserCreate,
+    current_user: User = Depends(require_permissions("admin"))
+):
+    """Create a new user (admin only)."""
+    new_user = create_user(user_data, permissions=["read", "predict", "feedback"])
+    return new_user
+
+
+# ============================================================================
 # Utility Functions
+# ============================================================================
 def ensure_directories():
     """Create necessary directories for the application"""
     directories = [
@@ -162,13 +232,16 @@ def save_annotations(annotations):
 
 # API Endpoints
 
-@app.post("/upload_video", response_model=VideoUploadResponse)
+@app.post("/upload_video", response_model=VideoUploadResponse, tags=["Video Processing"])
 async def upload_video(
         file: UploadFile = File(...),
-        frame_interval: int = Form(50, description="Extract every Nth frame")
+        frame_interval: int = Form(50, description="Extract every Nth frame"),
+        current_user: User = Depends(require_permissions("write"))
 ):
     """
     Upload a video file and extract frames based on the specified interval.
+
+    Requires authentication with 'write' permission.
 
     Args:
         file: Video file to upload
@@ -217,10 +290,15 @@ async def upload_video(
         raise HTTPException(status_code=500, detail=f"Error processing video: {str(e)}")
 
 
-@app.post("/predict_frames/{video_name}", response_model=PredictionResponse)
-async def predict_video_frames(video_name: str):
+@app.post("/predict_frames/{video_name}", response_model=PredictionResponse, tags=["Predictions"])
+async def predict_video_frames(
+        video_name: str,
+        current_user: User = Depends(require_permissions("predict"))
+):
     """
     Run CBM model predictions on extracted frames for a specific video.
+
+    Requires authentication with 'predict' permission.
 
     Args:
         video_name: Name of the video (from upload response)
@@ -296,15 +374,18 @@ async def predict_video_frames(video_name: str):
         raise HTTPException(status_code=500, detail=f"Error predicting frames: {str(e)}")
 
 
-@app.get("/predictions/{video_name}")
+@app.get("/predictions/{video_name}", tags=["Predictions"])
 async def get_video_predictions(
         video_name: str,
         include_normal: bool = Query(True, description="Include normal predictions"),
         class_filter: Optional[str] = Query(None, description="Filter by specific class"),
-        confidence_threshold: Optional[float] = Query(None, description="Minimum confidence threshold")
+        confidence_threshold: Optional[float] = Query(None, description="Minimum confidence threshold"),
+        current_user: User = Depends(require_permissions("read"))
 ):
     """
     Retrieve existing predictions for a specific video.
+
+    Requires authentication with 'read' permission.
 
     Args:
         video_name: Name of the video
@@ -360,7 +441,7 @@ async def get_video_predictions(
         raise HTTPException(status_code=500, detail=f"Error retrieving predictions: {str(e)}")
 
 
-@app.post("/feedback/expert", response_model=FeedbackResponse)
+@app.post("/feedback/expert", response_model=FeedbackResponse, tags=["Feedback"])
 async def submit_expert_feedback(
         frame_image: UploadFile = File(...),
         frame_id: str = Form(...),
@@ -368,10 +449,13 @@ async def submit_expert_feedback(
         model_prediction: str = Form(...),
         expert_classification: str = Form(...),
         confidence_score: Optional[float] = Form(None),
-        expert_notes: Optional[str] = Form(None)
+        expert_notes: Optional[str] = Form(None),
+        current_user: User = Depends(require_permissions("feedback"))
 ):
     """
     Submit expert feedback for active learning.
+
+    Requires authentication with 'feedback' permission.
 
     Args:
         frame_image: The frame image file
@@ -451,13 +535,19 @@ async def submit_expert_feedback(
         raise HTTPException(status_code=500, detail=f"Error processing expert feedback: {str(e)}")
 
 
-@app.post("/retrain")
-async def retrain_model():
+@app.post("/retrain", tags=["Model Management"])
+async def retrain_model(current_user: User = Depends(require_permissions("retrain"))):
     """
     Retrain the CBM model using accumulated expert feedback.
 
+    Requires authentication with 'retrain' permission.
+
+    This endpoint fine-tunes only the final classification layer (W_g) while
+    keeping the concept projection layer (W_c) frozen. This is appropriate
+    for active learning with limited feedback samples.
+
     Returns:
-        Status of the retraining process
+        Status of the retraining process with metrics
     """
     try:
         annotations = load_annotations()
@@ -468,11 +558,16 @@ async def retrain_model():
                 detail=f"Not enough samples for retraining. Need {RETRAIN_TRIGGER_COUNT}, have {len(annotations)}"
             )
 
-        # Use active learning data for retraining
+        # Fine-tune the final layer using expert feedback
         print(f"Retraining with {len(annotations)} active learning samples")
-        retrain_cbm(FEEDBACK_DATA_DIR, "static/images", "feedback")
+        result = retrain_cbm(
+            feedback_dir=FEEDBACK_DATA_DIR,
+            model_dir=TRAINED_MODEL_DIR,
+            output_dir=None,  # Update in place
+            device='cpu'
+        )
 
-        # Reload the model
+        # Reload the model with updated weights
         global model
         model = load_cbm(TRAINED_MODEL_DIR, 'cpu')
 
@@ -480,16 +575,22 @@ async def retrain_model():
             "status": "success",
             "message": "Model retrained successfully",
             "active_learning_samples": len(annotations),
-            "model_updated": True
+            "model_updated": True,
+            "training_accuracy": result["metrics"]["metrics"]["acc_tr"],
+            "sparsity": result["metrics"]["sparsity"]
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retraining model: {str(e)}")
 
 
-@app.get("/feedback/stats")
-async def get_feedback_stats():
-    """Get statistics about collected expert feedback"""
+@app.get("/feedback/stats", tags=["Feedback"])
+async def get_feedback_stats(current_user: User = Depends(require_permissions("read"))):
+    """
+    Get statistics about collected expert feedback.
+
+    Requires authentication with 'read' permission.
+    """
     try:
         annotations = load_annotations()
 
@@ -528,9 +629,13 @@ async def get_feedback_stats():
         raise HTTPException(status_code=500, detail=f"Error getting feedback stats: {str(e)}")
 
 
-@app.get("/videos")
-async def list_processed_videos():
-    """List all processed videos and their status"""
+@app.get("/videos", tags=["Video Processing"])
+async def list_processed_videos(current_user: User = Depends(require_permissions("read"))):
+    """
+    List all processed videos and their status.
+
+    Requires authentication with 'read' permission.
+    """
     try:
         videos = []
 
@@ -581,5 +686,23 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
+    import ssl
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Check for SSL certificates for HTTPS
+    ssl_keyfile = os.environ.get("SSL_KEYFILE", "certs/key.pem")
+    ssl_certfile = os.environ.get("SSL_CERTFILE", "certs/cert.pem")
+
+    # Use HTTPS if certificates exist, otherwise HTTP
+    if os.path.exists(ssl_keyfile) and os.path.exists(ssl_certfile):
+        print("Starting server with HTTPS...")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile
+        )
+    else:
+        print("SSL certificates not found. Starting server with HTTP...")
+        print("To enable HTTPS, generate certificates and place them in ./certs/")
+        uvicorn.run(app, host="0.0.0.0", port=8000)

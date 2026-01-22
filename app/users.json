@@ -1,0 +1,35 @@
+{
+  "users": {
+    "stergios": {
+      "username": "stergios",
+      "full_name": "Stergios",
+      "email": "stergios@example.com",
+      "hashed_password": "$2b$12$8iTtlZXlENvPovxKt9yeSOUeUtMKaur4pehZATxSc1g/tJp05c9zW",
+      "disabled": false,
+      "permissions": [
+        "read",
+        "write",
+        "predict",
+        "feedback",
+        "retrain",
+        "admin"
+      ]
+    },
+    "dimitris": {
+      "username": "dimitris",
+      "full_name": "Dimitris",
+      "email": "dimitris@example.com",
+      "hashed_password": "$2b$12$ll6MVNJSpfaHFztJfUlus.Npx9J6T9hdq8IL70whc.kpOyMUS3YKG",
+      "disabled": false,
+      "permissions": [
+        "read",
+        "write",
+        "predict",
+        "feedback",
+        "retrain",
+        "admin"
+      ]
+    }
+  },
+  "_note": "Default password for both users is 'changeme123'. Please change after first login."
+}
