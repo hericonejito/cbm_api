@@ -2,14 +2,14 @@
 /shared_data/multi_train/Normal
 /shared_data/multi_train/output
 /shared_data/videos_to_frame
-/shared_data/video_frames/
-/shared_data/predictions/
-/shared_data/active_learning_feedback/
 
-# Keep directory structure with .gitkeep files
-!shared_data/video_frames/.gitkeep
-!shared_data/predictions/.gitkeep
-!shared_data/active_learning_feedback/.gitkeep
+# Ignore contents of these directories but keep .gitkeep
+/shared_data/video_frames/*
+!/shared_data/video_frames/.gitkeep
+/shared_data/predictions/*
+!/shared_data/predictions/.gitkeep
+/shared_data/active_learning_feedback/*
+!/shared_data/active_learning_feedback/.gitkeep
 
 # SSL certificates
 /certs/
